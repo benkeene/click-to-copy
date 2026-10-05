@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "benkeene",
+  "description": "Claude Code plugins by Benjamin Keene",
+  "owner": {
+    "name": "Benjamin Keene"
+  },
+  "plugins": [
+    {
+      "name": "click-to-copy",
+      "description": "A [ copy ] button under every fenced code block in Claude's replies: one click puts the command on your clipboard as a one-liner.",
+      "author": {
+        "name": "Benjamin Keene"
+      },
+      "category": "productivity",
+      "source": "./",
+      "homepage": "https://github.com/benkeene/click-to-copy"
+    }
+  ]
+}

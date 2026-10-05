@@ -1,0 +1,30 @@
+{
+  "name": "click-to-copy",
+  "version": "0.1.0",
+  "description": "A [ copy ] button under every fenced code block in Claude's replies: one click puts the command on your clipboard as a one-liner, no `!` prefix, no re-typing.",
+  "author": {
+    "name": "benkeene"
+  },
+  "userConfig": {
+    "oneLine": {
+      "type": "string",
+      "title": "One-liner join",
+      "description": "How a multi-line block is flattened before it is copied. and joins the lines with ' && '; semicolon joins them with '; '; off keeps the newlines. Backslash line continuations are always unwrapped.",
+      "default": "and",
+      "options": ["and", "semicolon", "off"]
+    },
+    "fences": {
+      "type": "string",
+      "title": "Which blocks get a button",
+      "description": "all draws a button under every fenced block; shell only under blocks tagged bash, sh, zsh, shell, console, fish or untagged.",
+      "default": "all",
+      "options": ["all", "shell"]
+    },
+    "stripPrompt": {
+      "type": "boolean",
+      "title": "Strip shell prompts",
+      "description": "Remove a leading '$ ' or '% ' prompt from each copied line.",
+      "default": true
+    }
+  }
+}
