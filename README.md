@@ -1,17 +1,30 @@
 # click-to-copy
 
-A Claude Code mod that draws a `[ copy ]` button under every fenced code block
-in Claude's replies. One click puts the block on your clipboard, flattened to a
-one-liner, ready to paste into another terminal.
+A Claude Code mod that draws a `[ copy ]` button directly under every fenced
+code block in Claude's replies, with the exact text it will copy beside it. One
+click puts the block on your clipboard, flattened to a one-liner, ready to
+paste into another terminal.
 
 ```
 ⏺ Install it and run it:
 
-    brew install foo \
-      --with-bar
+  ▎ brew install foo \
+  ▎     --with-bar
 
-  [ copy ]  click to copy
+  [ copy ]  brew install foo --with-bar
+
+  Then check:
+
+  ▎ foo --version
+
+  [ copy ]  as shown
 ```
+
+The button sits under its own block, so there is never a question of which
+button copies what. When flattening changes the text, the result is printed
+next to the button so you read what you are about to paste; when the block is
+copied verbatim, the line says `as shown`. Hovering the button highlights the
+block it belongs to. The toast after a press echoes the payload again.
 
 Why: Claude Code likes to hand you commands as `! brew install foo`, meaning
 "type this into the Claude Code prompt". Sometimes you would rather run it
@@ -102,12 +115,14 @@ line with no line continuations.
 
 ## How it works
 
-`hooks/register.tsx` hooks `ui.render` for the `AssistantMessage` component,
-reads the reply's markdown off `e.props.text`, finds the fences, and returns a
-tree: the same `Markdown` the engine would have drawn, then a row of `Button`s
-whose `onPress` calls `$.ui.copy`. The stored message, and what the model sees,
-are untouched. A reply over the `Markdown` element's 10,000 character bound is
-left to the engine, so very long replies show no buttons.
+`hooks/register.tsx` hooks `ui.render` for the `AssistantMessage` component
+and reads the reply's markdown off `e.props.text`. `hooks/blocks.ts` splits it
+at the fences into prose and code segments. The hook returns a tree in the
+same order: each prose run as a `Markdown` element, each block as a `Code`
+element with a `[ copy ]` `Button` and the payload line beneath it. A press
+calls `$.ui.copy`. The stored message, and what the model sees, are untouched.
+A reply with no fence is left to the engine entirely, as is one with a single
+segment over the 10,000 character bound of a `Markdown` or `Code` element.
 
 ## Develop
 

@@ -1,10 +1,10 @@
 import type { Register } from 'claude-code'
 
-import { extractBlocks, isShellLang, toClipboardText } from './blocks'
+import { isShellLang, splitSegments, toClipboardText } from './blocks'
 import type { CopyOptions } from './blocks'
 
-/** The Markdown element's bound; a longer reply is left to the engine. */
-const MARKDOWN_LIMIT = 10_000
+/** The bound of a Markdown or Code element's text; a longer piece is left to the engine. */
+const LEAF_LIMIT = 10_000
 
 export const register: Register = (on, options) => {
   const copy: CopyOptions = {
@@ -14,39 +14,66 @@ export const register: Register = (on, options) => {
   const shellOnly = options.fences === 'shell'
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const text = e.props.text
-    if (text.length > MARKDOWN_LIMIT) return next(e)
+    const segments = splitSegments(e.props.text)
+    const wanted = (s: (typeof segments)[number]) =>
+      s.kind === 'code' && (!shellOnly || isShellLang(s.lang))
+    if (!segments.some(wanted)) return next(e)
+    if (segments.some(s => (s.kind === 'prose' ? s.text : s.code).length > LEAF_LIMIT)) return next(e)
 
-    const blocks = extractBlocks(text).filter(b => !shellOnly || isShellLang(b.lang))
-    if (blocks.length === 0) return next(e)
-
-    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
-    const several = blocks.length > 1
+    const { Box, Text, Button, Markdown, Code } = $.ui.resolve(e)
+    let n = 0
 
     return (
       <Box flexDirection="column">
-        <Markdown text={text} />
-        <Box flexDirection="row" gap={1} marginTop={1}>
-          {blocks.map((block, i) => (
-            <Button
-              key={`copy-${i + 1}`}
-              label={several ? `copy ${i + 1}` : 'copy'}
-              onPress={async press => {
-                const clip = toClipboardText(block.code, copy)
-                const result = await $.ui.copy({ text: clip, surface: press.surface })
-                $.ui.toast(
-                  result.isCopied
-                    ? `copied${several ? ` block ${i + 1}` : ''}: ${preview(clip)}`
-                    : `copy failed (${result.reason})`,
-                )
-              }}
-            />
-          ))}
-          <Text dimColor>{several ? 'click to copy a block' : 'click to copy'}</Text>
-        </Box>
+        {segments.map(segment => {
+          if (segment.kind === 'prose') return <Markdown text={segment.text} />
+          if (!wanted(segment)) {
+            return (
+              <Box marginY={1}>
+                <Code source={segment.code} language={segment.lang || undefined} />
+              </Box>
+            )
+          }
+          n += 1
+          const i = n
+          const scope = `block-${i}`
+          const payload = toClipboardText(segment.code, copy)
+          const isVerbatim = payload === segment.code.trim()
+          return (
+            <Box flexDirection="column" marginY={1}>
+              <Box flexDirection="row">
+                <Text dimColor hover={{ scope, dimColor: false, bold: true }}>▎ </Text>
+                <Box flexGrow={1}>
+                  <Code source={segment.code} language={segment.lang || undefined} />
+                </Box>
+              </Box>
+              <Box flexDirection="row" marginTop={1}>
+                <Button
+                  key={`copy-${i}`}
+                  label="copy"
+                  hover={{ scope }}
+                  onPress={async press => {
+                    const result = await $.ui.copy({ text: payload, surface: press.surface })
+                    $.ui.toast(
+                      result.isCopied ? `copied: ${preview(payload)}` : `copy failed (${result.reason})`,
+                    )
+                  }}
+                />
+                {isVerbatim ? (
+                  <Text dimColor>{'  as shown'}</Text>
+                ) : (
+                  <Text dimColor wrap="wrap">{`  ${payload}`}</Text>
+                )}
+              </Box>
+            </Box>
+          )
+        })}
       </Box>
     )
   })
 }
 
-const preview = (s: string): string => (s.length > 48 ? `${s.slice(0, 45)}...` : s)
+const preview = (s: string): string => {
+  const one = s.replace(/\n/g, ' ⏎ ')
+  return one.length > 60 ? `${one.slice(0, 57)}...` : one
+}
