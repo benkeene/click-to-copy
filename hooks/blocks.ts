@@ -71,10 +71,31 @@ export const extractBlocks = (text: string): Block[] =>
   splitSegments(text).flatMap(s => (s.kind === 'code' ? [{ lang: s.lang, code: s.code }] : []))
 
 /**
+ * True when a block holds shell structure that `&&` cannot flatten: a
+ * heredoc, a compound command (`if`, `for`, `while`, `until`, `case`, a
+ * `{ }` or `( )` group), or a function definition. Such a block is copied as
+ * written, whatever `oneLine` says, so the clipboard never holds a command
+ * that cannot run.
+ */
+export const isCompound = (code: string): boolean => {
+  const lines = code.split('\n').map(l => l.trim()).filter(l => l !== '' && !l.startsWith('#'))
+  if (lines.length < 2) return false
+  return lines.some(
+    l =>
+      /(^|[^<])<<-?[^<]/.test(l) ||
+      /^(if|for|while|until|case|select|function)\b/.test(l) ||
+      /^(then|do|else|elif|fi|done|esac)\b/.test(l) || /^[{}()]$/.test(l) ||
+      /\b(then|do|else)$|[{(]$/.test(l) ||
+      /^[A-Za-z_][A-Za-z0-9_]*\s*\(\)\s*\{?$/.test(l),
+  )
+}
+
+/**
  * What a copied block becomes on the clipboard: continuations unwrapped,
  * prompts stripped, comments and blank lines dropped, lines joined per
- * `oneLine`. With `oneLine: 'off'` only the continuations are unwrapped and
- * the prompts stripped; the lines stay as written.
+ * `oneLine`. With `oneLine: 'off'`, or a block `isCompound`, only the
+ * continuations are unwrapped and the prompts stripped; the lines stay as
+ * written.
  */
 export const toClipboardText = (code: string, options: CopyOptions): string => {
   const unwrapped = code.replace(/[ \t]*\\\r?\n[ \t]*/g, ' ')
@@ -82,7 +103,7 @@ export const toClipboardText = (code: string, options: CopyOptions): string => {
   if (options.stripPrompt) {
     lines = lines.map(l => l.replace(/^[ \t]*[$%] /, ''))
   }
-  if (options.oneLine === 'off') {
+  if (options.oneLine === 'off' || isCompound(code)) {
     return lines.join('\n').replace(/^\n+|\n+$/g, '')
   }
   const kept = lines.map(l => l.trim()).filter(l => l !== '' && !l.startsWith('#'))

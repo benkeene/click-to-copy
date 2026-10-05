@@ -69,7 +69,9 @@ A block is flattened before it reaches the clipboard:
 - backslash line continuations are unwrapped
 - a leading `$ ` or `% ` prompt is stripped from each line
 - blank lines and `#` comment lines are dropped
-- the remaining lines are joined with ` && `
+- the remaining lines are joined with ` && `, unless the block holds shell
+  structure (a loop, a conditional, a heredoc, a function), in which case the
+  lines are kept as written
 
 So this block
 
@@ -96,10 +98,12 @@ Set them under `/config` or in `settings.json` under `pluginConfigs.click-to-cop
 | `fences`      | `all`, `shell`                 | `all`   | `shell` only draws buttons under `bash`/`sh`/`zsh`/`console`/untagged   |
 | `stripPrompt` | `true`, `false`                | `true`  | drop a leading `$ ` / `% ` from each line                               |
 
-`and` is right for the common case of one command per block, or a short
-sequence. It is wrong for a block holding a heredoc, a `for`/`if` body, or a
-function definition, which `&&` cannot flatten: switch to `off` for those, or
-just select the text.
+A block that `&&` cannot flatten is never joined, whatever `oneLine` says: one
+holding a heredoc, an `if`/`for`/`while`/`until`/`case` body, a `{ }` or
+`( )` group, or a function definition is copied line for line (continuations
+still unwrapped, prompts still stripped), and its button says `as shown`. A
+one-line loop such as `for f in *; do echo "$f"; done` is not compound and
+joins like any other line.
 
 ## Pair it with a CLAUDE.md rule
 

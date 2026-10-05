@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { extractBlocks, splitSegments, toClipboardText } from '../hooks/blocks'
+import { extractBlocks, isCompound, splitSegments, toClipboardText } from '../hooks/blocks'
 
 const REPLY = [
   'Install it and run it:',
@@ -73,6 +73,32 @@ describe('blocks', () => {
   })
 })
 
+describe('compound blocks', () => {
+  const on = { oneLine: 'and', stripPrompt: true }
+
+  test('recognises loops, conditionals, heredocs, groups and functions', () => {
+    expect(isCompound('for f in *.log; do\n  gzip "$f"\ndone')).toBe(true)
+    expect(isCompound('if [ -f x ]; then\n  rm x\nfi')).toBe(true)
+    expect(isCompound('cat > notes.txt <<\'EOF\'\nhello\nEOF')).toBe(true)
+    expect(isCompound('{\n  a\n  b\n} > out')).toBe(true)
+    expect(isCompound('greet() {\n  echo hi\n}')).toBe(true)
+    expect(isCompound('while read -r l; do echo "$l"; done < f\nwc -l f')).toBe(true)
+  })
+
+  test('leaves plain sequences, a one-line loop, and here-strings alone', () => {
+    expect(isCompound('mkdir -p x\ncd x\ngit init')).toBe(false)
+    expect(isCompound('for f in *; do echo "$f"; done')).toBe(false)
+    expect(isCompound('grep foo <<< "$x"\necho ok')).toBe(false)
+    expect(isCompound('# only a comment\nls')).toBe(false)
+  })
+
+  test('a compound block is copied as written, with prompts still stripped', () => {
+    const loop = '$ for f in *.log; do\n    gzip "$f"\ndone'
+    expect(toClipboardText(loop, on)).toBe('for f in *.log; do\n    gzip "$f"\ndone')
+    expect(toClipboardText(loop, { ...on, oneLine: 'semicolon' })).toBe('for f in *.log; do\n    gzip "$f"\ndone')
+  })
+})
+
 describe('render', () => {
   test('each button sits right under its own block, with the payload beside it', async ($, on) => {
     const { copied, toasts } = engine(on)
@@ -127,6 +153,21 @@ describe('render', () => {
       expect((await ui.find({ type: 'Text' }))?.text).toBe(lead)
       await ui.unmount()
     }
+  })
+
+  test('a loop block shows "as shown" and copies its lines intact', async ($, on) => {
+    const { copied } = engine(on)
+    const code = 'for f in *.log; do\n  gzip "$f"\ndone'
+    const ui = await $.ui.mount({
+      plugin: 'click-to-copy',
+      surface: 'terminal',
+      component: 'AssistantMessage',
+      props: { text: '```bash\n' + code + '\n```', isFirstOfReply: true },
+    })
+    expect(await ui.find({ type: 'Text', text: /as shown/ })).toBeDefined()
+    await ui.press({ key: 'copy-1' })
+    expect(copied.at(-1)).toBe(code)
+    await ui.unmount()
   })
 
   test('leaves a reply without a fence to the engine', async ($, on) => {
