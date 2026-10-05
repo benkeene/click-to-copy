@@ -86,6 +86,7 @@ describe('render', () => {
       })
 
       expect(outline(await ui.drawn())).toEqual([
+        'Text',
         'Markdown',
         'Text', 'Code', 'Button#copy-1', 'Text',
         'Markdown',
@@ -110,6 +111,20 @@ describe('render', () => {
       await ui.press({ key: 'copy-3' })
       expect(copied.at(-1)).toBe('print(1)')
 
+      await ui.unmount()
+    }
+  })
+
+  test('opens a first block with the reply bullet and indents a later one', async ($, on) => {
+    engine(on)
+    for (const [isFirstOfReply, lead] of [[true, '⏺ '], [false, '  ']] as const) {
+      const ui = await $.ui.mount({
+        plugin: 'click-to-copy',
+        surface: 'terminal',
+        component: 'AssistantMessage',
+        props: { text: '```\nls\n```', isFirstOfReply },
+      })
+      expect((await ui.find({ type: 'Text' }))?.text).toBe(lead)
       await ui.unmount()
     }
   })

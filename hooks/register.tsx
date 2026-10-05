@@ -23,51 +23,65 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button, Markdown, Code } = $.ui.resolve(e)
     let n = 0
 
-    return (
-      <Box flexDirection="column">
-        {segments.map(segment => {
-          if (segment.kind === 'prose') return <Markdown text={segment.text} />
-          if (!wanted(segment)) {
-            return (
-              <Box marginY={1}>
-                <Code source={segment.code} language={segment.lang || undefined} />
-              </Box>
-            )
-          }
-          n += 1
-          const i = n
-          const scope = `block-${i}`
-          const payload = toClipboardText(segment.code, copy)
-          const isVerbatim = payload === segment.code.trim()
-          return (
-            <Box flexDirection="column" marginY={1}>
-              <Box flexDirection="row">
-                <Text dimColor hover={{ scope, dimColor: false, bold: true }}>▎ </Text>
-                <Box flexGrow={1}>
-                  <Code source={segment.code} language={segment.lang || undefined} />
-                </Box>
-              </Box>
-              <Box flexDirection="row" marginTop={1}>
-                <Button
-                  key={`copy-${i}`}
-                  label="copy"
-                  hover={{ scope }}
-                  onPress={async press => {
-                    const result = await $.ui.copy({ text: payload, surface: press.surface })
-                    $.ui.toast(
-                      result.isCopied ? `copied: ${preview(payload)}` : `copy failed (${result.reason})`,
-                    )
-                  }}
-                />
-                {isVerbatim ? (
-                  <Text dimColor>{'  as shown'}</Text>
-                ) : (
-                  <Text dimColor wrap="wrap">{`  ${payload}`}</Text>
-                )}
-              </Box>
+    const body = segments.map((segment, index) => {
+      const marginTop = index === 0 ? 0 : 1
+      if (segment.kind === 'prose') {
+        return (
+          <Box marginTop={marginTop}>
+            <Markdown text={segment.text} />
+          </Box>
+        )
+      }
+      if (!wanted(segment)) {
+        return (
+          <Box marginTop={marginTop}>
+            <Code source={segment.code} language={segment.lang || undefined} />
+          </Box>
+        )
+      }
+      n += 1
+      const i = n
+      const scope = `block-${i}`
+      const payload = toClipboardText(segment.code, copy)
+      const isVerbatim = payload === segment.code.trim()
+      return (
+        <Box flexDirection="column" marginTop={marginTop}>
+          <Box flexDirection="row">
+            <Text dimColor hover={{ scope, dimColor: false, bold: true }}>▎ </Text>
+            <Box flexGrow={1}>
+              <Code source={segment.code} language={segment.lang || undefined} />
             </Box>
-          )
-        })}
+          </Box>
+          <Box flexDirection="row" marginTop={1}>
+            <Button
+              key={`copy-${i}`}
+              label="copy"
+              hover={{ scope }}
+              onPress={async press => {
+                const result = await $.ui.copy({ text: payload, surface: press.surface })
+                $.ui.toast(
+                  result.isCopied ? `copied: ${preview(payload)}` : `copy failed (${result.reason})`,
+                )
+              }}
+            />
+            {isVerbatim ? (
+              <Text dimColor>{'  as shown'}</Text>
+            ) : (
+              <Text dimColor wrap="wrap">{`  ${payload}`}</Text>
+            )}
+          </Box>
+        </Box>
+      )
+    })
+
+    // The engine opens a reply with a bullet and indents its text two cells
+    // under it; a replaced tree draws neither, so draw them here.
+    return (
+      <Box flexDirection="row">
+        <Text>{e.props.isFirstOfReply ? '⏺ ' : '  '}</Text>
+        <Box flexDirection="column" flexGrow={1}>
+          {body}
+        </Box>
       </Box>
     )
   })
