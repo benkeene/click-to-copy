@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { extractBlocks, isCompound, splitSegments, toClipboardText } from '../hooks/blocks'
+import { COMMANDS_SECTION } from '../hooks/register'
 
 const REPLY = [
   'Install it and run it:',
@@ -208,5 +209,35 @@ describe('render', () => {
     await ui.press({ key: 'copy-1' })
     expect(copied.at(-1)).toBe('cd x; make')
     await ui.unmount()
+  })
+})
+
+describe('prompt', () => {
+  const ENGINE = [
+    { id: 'intro', text: 'You are Claude Code.', scope: 'shared' },
+    { id: 'tone', text: 'Be brief.', scope: 'session' },
+  ] as const
+  const FACTS = {
+    model: 'claude-fable-5-1',
+    promptModel: 'claude-fable-5-1',
+    surfaces: ['terminal'],
+    tools: ['Bash'],
+    outputStyle: null,
+    traits: [],
+  } as const
+
+  test('appends a session section telling Claude to fence commands', async ($, on) => {
+    on('prompt.compose', () => ({ sections: ENGINE }))
+    const { sections } = await $.prompt.compose(FACTS)
+    expect(sections.map(s => s.id)).toEqual(['intro', 'tone', 'click-to-copy:commands'])
+    expect(sections.at(-1)).toEqual(COMMANDS_SECTION)
+    expect(COMMANDS_SECTION.text).toMatch(/never tell them to\ntype it with the `!` prefix/)
+    expect(COMMANDS_SECTION.text).toMatch(/one command per block/)
+  })
+
+  test('leaves the prompt alone when promptRule is off', { options: { promptRule: false } }, async ($, on) => {
+    on('prompt.compose', () => ({ sections: ENGINE }))
+    const { sections } = await $.prompt.compose(FACTS)
+    expect(sections.map(s => s.id)).toEqual(['intro', 'tone'])
   })
 })

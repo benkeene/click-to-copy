@@ -6,12 +6,33 @@ import type { CopyOptions } from './blocks'
 /** The bound of a Markdown or Code element's text; a longer piece is left to the engine. */
 const LEAF_LIMIT = 10_000
 
+/** What the model reads so that commands for the person land in fences, not behind `!`. */
+export const COMMANDS_SECTION = {
+  id: 'click-to-copy:commands',
+  scope: 'session',
+  text: [
+    '# Commands for the person to run themselves',
+    'When the person should run a shell command themselves, never tell them to',
+    'type it with the `!` prefix into this prompt. Put the command in a fenced',
+    '`bash` code block of its own: one command per block, on a single line, no',
+    'backslash continuations, no leading `$` prompt. A copy button is drawn under',
+    'every fenced block, so a fence is what makes the command copyable.',
+  ].join('\n'),
+} as const
+
 export const register: Register = (on, options) => {
   const copy: CopyOptions = {
     oneLine: typeof options.oneLine === 'string' ? options.oneLine : 'and',
     stripPrompt: options.stripPrompt !== false,
   }
   const shellOnly = options.fences === 'shell'
+
+  if (options.promptRule !== false) {
+    on('prompt.compose', async ($, e, next) => {
+      const composed = await next(e)
+      return { sections: [...composed.sections, COMMANDS_SECTION] }
+    })
+  }
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const segments = splitSegments(e.props.text)

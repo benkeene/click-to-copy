@@ -3,7 +3,8 @@
 A Claude Code mod that draws a `[ copy ]` button directly under every fenced
 code block in Claude's replies, with the exact text it will copy beside it. One
 click puts the block on your clipboard, flattened to a one-liner, ready to
-paste into another terminal.
+paste into another terminal. It also asks Claude to fence the commands it
+wants you to run, instead of suggesting the `!` prefix.
 
 ```
 ⏺ Install it and run it:
@@ -97,6 +98,7 @@ Set them under `/config` or in `settings.json` under `pluginConfigs.click-to-cop
 | `oneLine`     | `and`, `semicolon`, `off`      | `and`   | how lines are joined; `off` keeps newlines (continuations still unwrap) |
 | `fences`      | `all`, `shell`                 | `all`   | `shell` only draws buttons under `bash`/`sh`/`zsh`/`console`/untagged   |
 | `stripPrompt` | `true`, `false`                | `true`  | drop a leading `$ ` / `% ` from each line                               |
+| `promptRule`  | `true`, `false`                | `true`  | add the system-prompt section that asks Claude to fence commands        |
 
 A block that `&&` cannot flatten is never joined, whatever `oneLine` says: one
 holding a heredoc, an `if`/`for`/`while`/`until`/`case` body, a `{ }` or
@@ -105,22 +107,23 @@ still unwrapped, prompts still stripped), and its button says `as shown`. A
 one-line loop such as `for f in *; do echo "$f"; done` is not compound and
 joins like any other line.
 
-## Pair it with a CLAUDE.md rule
+## It also tells Claude to fence commands
 
-The buttons only appear under fenced blocks, so tell Claude to stop suggesting
-the `!` prefix and to fence commands instead. In `~/.claude/CLAUDE.md`:
+The buttons only appear under fenced blocks, and out of the box Claude Code
+tells Claude to hand you commands as `! command` instead. So the plugin adds
+one short section to the system prompt: put a command the person should run
+themselves in a fenced `bash` block of its own, one per block, on one line,
+no `!` prefix. Nothing else about the prompt changes, and the section sits on
+the session side of the prompt cache, so it costs nothing shared.
 
-```markdown
-# Commands for me to run
-Never tell me to run a command with the `!` prefix. Put any command I should
-run myself in a fenced `bash` code block, one command per block, as a single
-line with no line continuations.
-```
+Turn it off with the `promptRule` option if you manage this in your own
+CLAUDE.md, or just prefer the `!` suggestions.
 
 ## How it works
 
-`hooks/register.tsx` hooks `ui.render` for the `AssistantMessage` component
-and reads the reply's markdown off `e.props.text`. `hooks/blocks.ts` splits it
+`hooks/register.tsx` hooks two events. `prompt.compose` appends the
+commands section to whatever the engine composed. `ui.render` for the
+`AssistantMessage` component reads the reply's markdown off `e.props.text`. `hooks/blocks.ts` splits it
 at the fences into prose and code segments. The hook returns a tree in the
 same order: each prose run as a `Markdown` element, each block as a `Code`
 element with a `[ copy ]` `Button` and the payload line beneath it. A press
