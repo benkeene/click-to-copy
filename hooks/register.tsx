@@ -12,11 +12,15 @@ export const COMMANDS_SECTION = {
   scope: 'session',
   text: [
     '# Commands for the person to run themselves',
-    'When the person should run a shell command themselves, never tell them to',
-    'type it with the `!` prefix into this prompt. Put the command in a fenced',
-    '`bash` code block of its own: one command per block, on a single line, no',
-    'backslash continuations, no leading `$` prompt. A copy button is drawn under',
-    'every fenced block, so a fence is what makes the command copyable.',
+    'When the person should run a shell command themselves (an interactive login,',
+    'an ssh session, anything you cannot run for them), never tell them to type',
+    'it with the `!` prefix into this prompt, and never write the command inline',
+    'in backticks inside a sentence. Put it in a fenced `bash` code block of its',
+    'own: one command per block, on a single line, no backslash continuations, no',
+    'leading `$` prompt. This holds even when the answer is one or two sentences:',
+    'the sentence says what the command does, the fence holds the command. A copy',
+    'button is drawn under every fenced block, so a fence is what makes the',
+    'command copyable; an inline command cannot be copied.',
   ].join('\n'),
 } as const
 

@@ -231,7 +231,8 @@ describe('prompt', () => {
     const { sections } = await $.prompt.compose(FACTS)
     expect(sections.map(s => s.id)).toEqual(['intro', 'tone', 'click-to-copy:commands'])
     expect(sections.at(-1)).toEqual(COMMANDS_SECTION)
-    expect(COMMANDS_SECTION.text).toMatch(/never tell them to\ntype it with the `!` prefix/)
+    expect(COMMANDS_SECTION.text).toMatch(/`!` prefix/)
+    expect(COMMANDS_SECTION.text).toMatch(/never write the command inline/)
     expect(COMMANDS_SECTION.text).toMatch(/one command per block/)
   })
 
