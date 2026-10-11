@@ -2,8 +2,9 @@
 
 A Claude Code mod that draws a `[ copy ]` button directly under every fenced
 code block in Claude's replies, with the exact text it will copy beside it. One
-click puts the block on your clipboard, flattened to a one-liner, ready to
-paste into another terminal. It also asks Claude to fence the commands it
+click puts a shell block on your clipboard, flattened to a one-liner, ready to
+paste into another terminal; a block in any other language is copied exactly
+as written. It also asks Claude to fence the commands it
 wants you to run, instead of suggesting the `!` prefix.
 
 ```
@@ -21,6 +22,8 @@ wants you to run, instead of suggesting the `!` prefix.
   [ copy ]  as shown
 ```
 
+(Both blocks above are tagged `bash`.)
+
 The button sits under its own block, so there is never a question of which
 button copies what. When flattening changes the text, the result is printed
 next to the button so you read what you are about to paste; when the block is
@@ -35,8 +38,8 @@ clean line back is fiddly. This mod makes it one click.
 
 ## Install
 
-This is a function-hooks plugin ("mod"), an early-access part of Claude Code's
-plugin system. It needs a recent Claude Code (built and tested on 2.1.289).
+This is a function-hooks plugin ("mod"). Mods are on by default in Claude Code
+2.1.287 and later; this one was built and tested on 2.1.296.
 
 From a clone, for one session:
 
@@ -65,14 +68,13 @@ set-clipboard on`). macOS Terminal.app ignores OSC 52 entirely.
 
 ## What gets copied
 
-A block is flattened before it reaches the clipboard:
+A block tagged `bash`, `sh`, `zsh` or `shell` is flattened before it reaches
+the clipboard:
 
-- backslash line continuations are unwrapped
-- a leading `$ ` or `% ` prompt is stripped from each line
-- blank lines and `#` comment lines are dropped
-- the remaining lines are joined with ` && `, unless the block holds shell
-  structure (a loop, a conditional, a heredoc, a function), in which case the
-  lines are kept as written
+- backslash line continuations are unwrapped, the way the shell would
+- a leading `$ ` or `% ` prompt is stripped from each command
+- blank lines and `#` comments are dropped, a trailing `# comment` included
+- the commands are joined with ` && `
 
 So this block
 
@@ -80,7 +82,7 @@ So this block
 # install, then check
 $ brew install foo \
     --with-bar
-foo --version
+$ foo --version  # should print 2.x
 ```
 
 copies as
@@ -89,23 +91,44 @@ copies as
 brew install foo --with-bar && foo --version
 ```
 
+A `console` (or `shell-session`) block is a transcript: its `$ ` commands are
+kept and joined, the output between them dropped.
+
+Everything else is copied exactly as written, and its button says `as shown`:
+any other language, `fish`, and a fence with no language tag at all.
+
+### When a shell block is not joined
+
+The clipboard should never hold a command the block does not show. So the
+join happens only when every line is a plain command the plugin could follow
+from end to end. Otherwise it leaves the lines alone:
+
+| the block holds | what is copied |
+| --- | --- |
+| a heredoc, or a quote or `$( )` spanning lines | the block, exactly |
+| `$ ` on some commands and not on others | the block, exactly: output and unprompted commands cannot be told apart |
+| a loop, a conditional, a `case`, a function, a `{ }` or `( )` group | its lines, less the prompts |
+| a line ending or starting with `\|`, `&`, `&&`, `\|\|` or `;` | its lines, less the prompts |
+| `set`, `shopt`, `alias`, `trap`, or a `$?` | its lines, less the prompts: joining would change what they do |
+
+A one-line loop such as `for f in *; do echo "$f"; done` alone in its block is
+copied as it stands; next to other commands it keeps the block from joining.
+
+Note what the join itself means: `a && b` does not run `b` when `a` fails,
+where pasting the two lines would. That is the point of the default (a
+sequence stops at its first failure). Set `oneLine` to `semicolon` to run on
+regardless, or `off` to copy every block exactly as written.
+
 ## Options
 
 Set them under `/config` or in `settings.json` under `pluginConfigs.click-to-copy`.
 
-| option        | values                         | default | what it does                                                            |
-| ------------- | ------------------------------ | ------- | ----------------------------------------------------------------------- |
-| `oneLine`     | `and`, `semicolon`, `off`      | `and`   | how lines are joined; `off` keeps newlines (continuations still unwrap) |
-| `fences`      | `all`, `shell`                 | `all`   | `shell` only draws buttons under `bash`/`sh`/`zsh`/`console`/untagged   |
-| `stripPrompt` | `true`, `false`                | `true`  | drop a leading `$ ` / `% ` from each line                               |
-| `promptRule`  | `true`, `false`                | `true`  | add the system-prompt section that asks Claude to fence commands        |
-
-A block that `&&` cannot flatten is never joined, whatever `oneLine` says: one
-holding a heredoc, an `if`/`for`/`while`/`until`/`case` body, a `{ }` or
-`( )` group, or a function definition is copied line for line (continuations
-still unwrapped, prompts still stripped), and its button says `as shown`. A
-one-line loop such as `for f in *; do echo "$f"; done` is not compound and
-joins like any other line.
+| option        | values                         | default | what it does                                                              |
+| ------------- | ------------------------------ | ------- | ------------------------------------------------------------------------- |
+| `oneLine`     | `and`, `semicolon`, `off`      | `and`   | how a shell block's commands are joined; `off` copies every block exactly |
+| `fences`      | `all`, `shell`                 | `all`   | `shell` only draws buttons under `bash`/`sh`/`zsh`/`shell`/`fish`/`console` |
+| `stripPrompt` | `true`, `false`                | `true`  | drop a leading `$ ` / `% ` from each command of a shell block             |
+| `promptRule`  | `true`, `false`                | `true`  | add the system-prompt section that asks Claude to fence commands          |
 
 ## It also tells Claude to fence commands
 
@@ -128,8 +151,25 @@ at the fences into prose and code segments. The hook returns a tree in the
 same order: each prose run as a `Markdown` element, each block as a `Code`
 element with a `[ copy ]` `Button` and the payload line beneath it. A press
 calls `$.ui.copy`. The stored message, and what the model sees, are untouched.
-A reply with no fence is left to the engine entirely, as is one with a single
-segment over the 10,000 character bound of a `Markdown` or `Code` element.
+
+For a shell block, `scanShell` in `hooks/blocks.ts` reads the text into
+commands, tracking quotes, `$( )`, `${ }`, backticks and heredocs, so that a
+`#`, a backslash or a `$ ` is only taken for a comment, a continuation or a
+prompt where the shell would take it so. It is not a shell parser; whatever
+it cannot follow, it says so, and the block is copied as written.
+
+Some replies are left to the engine entirely, with no buttons:
+
+- one with no fenced block
+- one with a segment over the 10,000 character bound of a `Markdown` or `Code` element
+- one whose markdown would not survive being drawn in pieces: a fence opening
+  on a list marker's or blockquote's own line (`- ```bash`), or a reference
+  link definition
+
+A fence indented under a list item is read, and drawn at its indent; the list
+around it is drawn as separate runs of prose, so a list numbered `1.` `1.`
+`1.` restarts after each block. A block still streaming gets its button when
+its fence closes.
 
 ## Develop
 

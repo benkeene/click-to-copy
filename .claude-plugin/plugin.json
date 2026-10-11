@@ -1,7 +1,7 @@
 {
   "name": "click-to-copy",
-  "version": "0.1.0",
-  "description": "A [ copy ] button under every fenced code block in Claude's replies, with the exact text it will copy beside it. One click puts the command on your clipboard as a one-liner. Also tells Claude to fence commands instead of suggesting the `!` prefix.",
+  "version": "0.2.0",
+  "description": "A [ copy ] button under every fenced code block in Claude's replies, with the exact text it will copy beside it. One click puts a shell command on your clipboard as a one-liner, and any other block exactly as written. Also tells Claude to fence commands instead of suggesting the `!` prefix.",
   "author": {
     "name": "benkeene"
   },
@@ -9,7 +9,7 @@
     "oneLine": {
       "type": "string",
       "title": "One-liner join",
-      "description": "How a multi-line block is flattened before it is copied. and joins the lines with ' && '; semicolon joins them with '; '; off keeps the newlines. Backslash line continuations are always unwrapped.",
+      "description": "How a multi-line shell block is flattened before it is copied. and joins its commands with ' && '; semicolon joins them with '; '; off copies every block exactly as written. A block that cannot be joined safely is never joined.",
       "default": "and",
       "options": [
         "and",
@@ -20,7 +20,7 @@
     "fences": {
       "type": "string",
       "title": "Which blocks get a button",
-      "description": "all draws a button under every fenced block; shell only under blocks tagged bash, sh, zsh, shell, console, fish or untagged.",
+      "description": "all draws a button under every fenced block; shell only under blocks tagged bash, sh, zsh, shell, fish or console. Either way, only shell blocks are flattened.",
       "default": "all",
       "options": [
         "all",
@@ -30,7 +30,7 @@
     "stripPrompt": {
       "type": "boolean",
       "title": "Strip shell prompts",
-      "description": "Remove a leading '$ ' or '% ' prompt from each copied line.",
+      "description": "Remove a leading '$ ' or '% ' prompt from each command of a shell block.",
       "default": true
     },
     "promptRule": {

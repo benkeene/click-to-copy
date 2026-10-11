@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "click-to-copy",
-      "description": "A [ copy ] button under every fenced code block in Claude's replies: one click puts the command on your clipboard as a one-liner.",
+      "description": "A [ copy ] button under every fenced code block in Claude's replies: one click puts a shell command on your clipboard as a one-liner, and any other block exactly as written.",
       "author": {
         "name": "Benjamin Keene"
       },
