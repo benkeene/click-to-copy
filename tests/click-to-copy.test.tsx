@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { extractBlocks, isCompound, splitSegments, toClipboardText } from '../hooks/blocks'
+import { extractBlocks, isPlainCommand, scanShell, splitSegments, toClipboardText } from '../hooks/blocks'
 import { COMMANDS_SECTION } from '../hooks/register'
 
 const REPLY = [
@@ -14,7 +14,7 @@ const REPLY = [
   '',
   'Then check:',
   '',
-  '```',
+  '```sh',
   '# the version',
   'foo --version',
   'foo doctor',
@@ -25,6 +25,10 @@ const REPLY = [
   '```',
   '',
 ].join('\n')
+
+/** A `bash` block's clipboard text under the default options, or those given. */
+const sh = (code: string, options: { oneLine?: string; stripPrompt?: boolean } = {}): string =>
+  toClipboardText({ lang: 'bash', code }, { oneLine: 'and', stripPrompt: true, ...options })
 
 /** What stands for the engine beneath the plugin: a surface that copies, toasts and draws its own row. */
 const engine = (on: On) => {
@@ -53,9 +57,9 @@ const outline = (node: unknown): string[] => {
 
 describe('blocks', () => {
   test('splits a reply into prose and code segments in order', () => {
-    const kinds = splitSegments(REPLY).map(s => (s.kind === 'code' ? `code:${s.lang}` : 'prose'))
-    expect(kinds).toEqual(['prose', 'code:bash', 'prose', 'code:', 'code:python'])
-    expect(splitSegments(REPLY)[0]).toEqual({ kind: 'prose', text: 'Install it and run it:' })
+    const kinds = (splitSegments(REPLY) ?? []).map(s => (s.kind === 'code' ? `code:${s.lang}` : 'prose'))
+    expect(kinds).toEqual(['prose', 'code:bash', 'prose', 'code:sh', 'code:python'])
+    expect(splitSegments(REPLY)?.[0]).toEqual({ kind: 'prose', text: 'Install it and run it:' })
     expect(extractBlocks(REPLY)[1]?.code).toBe('# the version\nfoo --version\nfoo doctor')
   })
 
@@ -64,39 +68,183 @@ describe('blocks', () => {
     expect(extractBlocks(text).map(b => b.code)).toEqual(['```js\nx\n```', 'tail'])
   })
 
-  test('flattens to a one-liner: continuations, prompts, comments, joins', () => {
+  test('reads a fence under a list item, and its lines without the indent', () => {
+    const text = '1. first\n\n   ```sh\n   echo hi\n     nested\n   ```\n\n2. second'
+    expect(splitSegments(text)).toEqual([
+      { kind: 'prose', text: '1. first' },
+      { kind: 'code', lang: 'sh', code: 'echo hi\n  nested', isClosed: true, indent: 3 },
+      { kind: 'prose', text: '2. second' },
+    ])
+  })
+
+  test('takes the language from the info string, and no fence from an inline span', () => {
+    expect(extractBlocks('```bash title="x"\na\n```\n~~~{.bash}\nb\n~~~')).toEqual([
+      { lang: 'bash', code: 'a' },
+      { lang: 'bash', code: 'b' },
+    ])
+    expect(extractBlocks('```not a fence``` here\nprose')).toEqual([])
+  })
+
+  test('marks a fence the text ends inside', () => {
+    expect(splitSegments('```bash\necho "a')).toEqual([
+      { kind: 'code', lang: 'bash', code: 'echo "a', isClosed: false, indent: 0 },
+    ])
+  })
+
+  test('gives up on markdown it does not follow', () => {
+    expect(splitSegments('- ```bash\n  echo hi\n  ```\nafter')).toBeNull()
+    expect(splitSegments('> ```bash\n> echo hi\n> ```')).toBeNull()
+    expect(splitSegments('See [guide][g].\n\n```sh\nls\n```\n\n[g]: /guide')).toBeNull()
+  })
+
+  test('flattens a shell block to a one-liner: continuations, prompts, comments, joins', () => {
+    expect(sh('$ brew install foo \\\n    --with-bar')).toBe('brew install foo --with-bar')
+    expect(sh('# the version\nfoo --version\n\nfoo doctor\n')).toBe('foo --version && foo doctor')
+    expect(sh('a\nb', { oneLine: 'semicolon' })).toBe('a; b')
+    // Anything but a join copies the block exactly, prompts and all.
+    for (const oneLine of ['off', 'typo']) {
+      expect(sh('$ a\n# c\n$ b \\\n  d\n', { oneLine })).toBe('$ a\n# c\n$ b \\\n  d\n')
+    }
+    expect(sh('$ a', { stripPrompt: false })).toBe('$ a')
+    expect(sh('a \\\r\n  b\r\nc')).toBe('a b && c')
+  })
+
+  test('copies every other language, and an untagged block, as written', () => {
     const on = { oneLine: 'and', stripPrompt: true }
-    expect(toClipboardText('$ brew install foo \\\n    --with-bar', on)).toBe('brew install foo --with-bar')
-    expect(toClipboardText('# the version\nfoo --version\n\nfoo doctor\n', on)).toBe('foo --version && foo doctor')
-    expect(toClipboardText('a\nb', { ...on, oneLine: 'semicolon' })).toBe('a; b')
-    expect(toClipboardText('$ a\n# c\nb \\\n  d\n', { ...on, oneLine: 'off' })).toBe('a\n# c\nb d')
-    expect(toClipboardText('$ a', { ...on, stripPrompt: false })).toBe('$ a')
+    for (const [lang, code] of [
+      ['python', '# set up\nx = 1\ny = x + 1'],
+      ['yaml', 'name: foo\n# note\nport: 80'],
+      ['diff', '-old line\n+new line'],
+      ['latex', '% preamble\n\\usepackage{amsmath}'],
+      ['', 'error: file not found\n  at line 3'],
+      ['fish', 'echo one\nand echo two'],
+      ['python', '\n  indented = True  \n'],
+    ] as const) {
+      expect(toClipboardText({ lang, code }, on)).toBe(code)
+    }
   })
 })
 
-describe('compound blocks', () => {
-  const on = { oneLine: 'and', stripPrompt: true }
-
-  test('recognises loops, conditionals, heredocs, groups and functions', () => {
-    expect(isCompound('for f in *.log; do\n  gzip "$f"\ndone')).toBe(true)
-    expect(isCompound('if [ -f x ]; then\n  rm x\nfi')).toBe(true)
-    expect(isCompound('cat > notes.txt <<\'EOF\'\nhello\nEOF')).toBe(true)
-    expect(isCompound('{\n  a\n  b\n} > out')).toBe(true)
-    expect(isCompound('greet() {\n  echo hi\n}')).toBe(true)
-    expect(isCompound('while read -r l; do echo "$l"; done < f\nwc -l f')).toBe(true)
+describe('shell blocks', () => {
+  test('a backslash joins words only where the shell would', () => {
+    expect(sh('echo foo\\\nbar\nls')).toBe('echo foobar && ls')
+    // A comment does not continue onto the next line.
+    expect(sh('# note \\\nrm x\nls')).toBe('rm x && ls')
+    // Inside quotes the indent is part of the string, so the block stays as written.
+    expect(sh('echo "a \\\n   b"\nls')).toBe('echo "a \\\n   b"\nls')
   })
 
-  test('leaves plain sequences, a one-line loop, and here-strings alone', () => {
-    expect(isCompound('mkdir -p x\ncd x\ngit init')).toBe(false)
-    expect(isCompound('for f in *; do echo "$f"; done')).toBe(false)
-    expect(isCompound('grep foo <<< "$x"\necho ok')).toBe(false)
-    expect(isCompound('# only a comment\nls')).toBe(false)
+  test('drops a trailing comment and leaves a # that is no comment', () => {
+    expect(sh('ls -la  # list\npwd')).toBe('ls -la && pwd')
+    expect(sh("ls # it's fine\npwd")).toBe('ls && pwd')
+    expect(sh('echo "a # b"\necho $#\ncurl http://x/y#frag\necho ${#x}')).toBe(
+      'echo "a # b" && echo $# && curl http://x/y#frag && echo ${#x}',
+    )
+    expect(sh('echo "$(basename "$PWD") # no"\nls')).toBe('echo "$(basename "$PWD") # no" && ls')
   })
 
-  test('a compound block is copied as written, with prompts still stripped', () => {
-    const loop = '$ for f in *.log; do\n    gzip "$f"\ndone'
-    expect(toClipboardText(loop, on)).toBe('for f in *.log; do\n    gzip "$f"\ndone')
-    expect(toClipboardText(loop, { ...on, oneLine: 'semicolon' })).toBe('for f in *.log; do\n    gzip "$f"\ndone')
+  test('a console transcript keeps its prompted commands and drops the output', () => {
+    const console = (code: string) => toClipboardText({ lang: 'console', code }, { oneLine: 'and', stripPrompt: true })
+    expect(console('$ git status\nOn branch main\nnothing to commit\n$ git log \\\n  --oneline\nabc123 msg')).toBe(
+      'git status && git log --oneline',
+    )
+    // No prompt at all, or a prompted command left open: nothing says which lines are commands.
+    expect(console('On branch main\nnothing to commit')).toBe('On branch main\nnothing to commit')
+    expect(console('$ cat file |\n  grep foo')).toBe('$ cat file |\n  grep foo')
+  })
+
+  test('a bash block loses its prompts only when every command has one', () => {
+    expect(sh('$ cd x\n$ make')).toBe('cd x && make')
+    expect(sh('$ for f in *.log; do\n$   gzip "$f"\n$ done')).toBe('for f in *.log; do\n  gzip "$f"\ndone')
+    // Output, or a second command? The text cannot say, so nothing is dropped and nothing is stripped.
+    expect(sh('$ echo first\necho second')).toBe('$ echo first\necho second')
+    expect(sh('$ git status\nOn branch main')).toBe('$ git status\nOn branch main')
+    // `$(` and a job spec are not prompts.
+    expect(sh('$(which python) -V\nfg %1')).toBe('$(which python) -V && fg %1')
+  })
+
+  test('never joins across a dangling operator', () => {
+    for (const code of [
+      'server &\ncurl localhost:8080',
+      'cat file |\n  grep foo',
+      'cat file\n  | grep foo',
+      'make &&\nmake install',
+      'cd /tmp;\nls',
+    ]) {
+      expect(sh(code)).toBe(code)
+      expect(sh(code, { oneLine: 'semicolon' })).toBe(code)
+    }
+  })
+
+  test('never joins a block holding shell structure', () => {
+    for (const code of [
+      'for f in *.log; do\n  gzip "$f"\ndone',
+      'if [ -f x ]; then\n  rm x\nfi',
+      'for f in *; do echo "$f"; done\nls',
+      'while read -r l; do echo "$l"; done < f\nwc -l f',
+      'case $x in\n  a) echo a ;;\nesac',
+      'greet() {\n  echo hi\n}',
+      '{\n  a\n  b\n} > out',
+      '(\n  cd x\n  make\n)',
+      'x=(\n  a\n  b\n)\necho ${x[@]}',
+      'true && { echo one\necho two; }',
+      'time (echo one\necho two)',
+      '[[\n"$x" == a\n]]',
+    ]) {
+      expect(sh(code)).toBe(code)
+    }
+  })
+
+  test('copies heredocs and strings that span lines exactly', () => {
+    for (const code of [
+      "cat > f <<'EOF'\n$ not a prompt\n# not a comment \\\nEOF\necho done",
+      // Stripping the blank or the prompt would end the heredoc early and run its next line.
+      "cat <<'EOF'\nEOF \nprintf unexpected\nEOF",
+      "$ cat <<'EOF'\n$ EOF\nprintf unexpected\nEOF",
+      'git commit -m "first\n\n$ second # x"\ngit push',
+      "printf '%s' 'a\n# keep\n\nb'",
+      "echo 'oops\nls",
+    ]) {
+      expect(sh(code)).toBe(code)
+    }
+  })
+
+  test('never joins where the line break carries meaning', () => {
+    for (const code of [
+      'set -e\n(false; echo unexpected)\necho done',
+      "alias hi='echo hello'\nhi",
+      'false\necho "$?"',
+    ]) {
+      expect(sh(code)).toBe(code)
+      expect(sh(code, { oneLine: 'semicolon' })).toBe(code)
+    }
+  })
+
+  test('keeps an escaped blank at the end of a command', () => {
+    expect(sh("printf '%s' x\\ ")).toBe("printf '%s' x\\ ")
+    expect(sh("printf '%s' foo\\\\\necho next")).toBe("printf '%s' foo\\\\ && echo next")
+  })
+
+  test('joins what is plain: substitutions, here-strings, assignments', () => {
+    expect(sh('mkdir -p x\ncd x\ngit init')).toBe('mkdir -p x && cd x && git init')
+    expect(sh('v=$(git rev-parse HEAD)\necho "$v"')).toBe('v=$(git rev-parse HEAD) && echo "$v"')
+    expect(sh('grep foo <<< "$x"\necho ok')).toBe('grep foo <<< "$x" && echo ok')
+    expect(sh("echo $'it\\'s'\nls")).toBe("echo $'it\\'s' && ls")
+    expect(sh('for f in *; do echo "$f"; done')).toBe('for f in *; do echo "$f"; done')
+  })
+
+  test('says which commands can stand in a join', () => {
+    expect(isPlainCommand('git init')).toBe(true)
+    expect(isPlainCommand('done')).toBe(false)
+    expect(isPlainCommand('download x')).toBe(true)
+    expect(isPlainCommand('time-machine --go')).toBe(true)
+    expect(isPlainCommand('settings --list')).toBe(true)
+    expect(isPlainCommand('{ a; b; }')).toBe(false)
+    expect(isPlainCommand('echo {a,b}')).toBe(true)
+    expect(scanShell('a \\\n b', true)).toEqual({
+      isSound: true,
+      lines: [{ text: 'a b', comment: '', raw: 'a \\\n b', hadPrompt: false, hasStray: false }],
+    })
   })
 })
 
@@ -184,6 +332,59 @@ describe('render', () => {
     await ui.unmount()
   })
 
+  test('leaves a reply it cannot split, and a block still streaming, without a button', async ($, on) => {
+    engine(on)
+    for (const [text, drawn] of [
+      ['- ```bash\n  echo hi\n  ```\nafter', /engine drew this/],
+      ['Run:\n\n```bash\necho hi', /engine drew this/],
+    ] as const) {
+      const ui = await $.ui.mount({
+        plugin: 'click-to-copy',
+        surface: 'terminal',
+        component: 'AssistantMessage',
+        props: { text, isFirstOfReply: true },
+      })
+      expect(await ui.findAll({ type: 'Button' })).toHaveLength(0)
+      expect(await ui.find({ type: 'Text', text: drawn })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('copies a multi-line python block as shown', async ($, on) => {
+    const { copied } = engine(on)
+    const code = '# set up\nx = 1\ny = x + 1'
+    const ui = await $.ui.mount({
+      plugin: 'click-to-copy',
+      surface: 'terminal',
+      component: 'AssistantMessage',
+      props: { text: '```python\n' + code + '\n```', isFirstOfReply: true },
+    })
+    expect(await ui.find({ type: 'Text', text: /as shown/ })).toBeDefined()
+    await ui.press({ key: 'copy-1' })
+    expect(copied.at(-1)).toBe(code)
+    await ui.unmount()
+  })
+
+  test('says so when the clipboard throws', async ($, on) => {
+    const toasts: string[] = []
+    on('ui.copy', () => {
+      throw new Error('no clipboard')
+    })
+    on('ui.toast', (_, e) => {
+      toasts.push(e.text)
+      return { value: undefined }
+    })
+    const ui = await $.ui.mount({
+      plugin: 'click-to-copy',
+      surface: 'terminal',
+      component: 'AssistantMessage',
+      props: { text: '```bash\nls\n```', isFirstOfReply: true },
+    })
+    await ui.press({ key: 'copy-1' })
+    expect(toasts.at(-1)).toMatch(/copy failed/)
+    await ui.unmount()
+  })
+
   test('shell-only mode draws the python block without a button', { options: { fences: 'shell' } }, async ($, on) => {
     engine(on)
     const ui = await $.ui.mount({
@@ -203,7 +404,7 @@ describe('render', () => {
       plugin: 'click-to-copy',
       surface: 'terminal',
       component: 'AssistantMessage',
-      props: { text: '```\ncd x\nmake\n```', isFirstOfReply: true },
+      props: { text: '```bash\ncd x\nmake\n```', isFirstOfReply: true },
     })
     expect((await ui.find({ type: 'Text', text: /cd x/ }))?.text.trim()).toBe('cd x; make')
     await ui.press({ key: 'copy-1' })
